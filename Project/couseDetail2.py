@@ -8,7 +8,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet
 
-# ---------------- COURSE URLS (FIXED) ----------------
+# ---------------- COURSE URLS ----------------
 course_urls = [
     "https://sunbeaminfo.in/modular-courses/machine-learning-classes",
     "https://sunbeaminfo.in/modular-courses/mastering-generative-ai",
@@ -36,22 +36,63 @@ for url in course_urls:
     try:
         print(f"\n🔎 Opening: {url}")
         driver.get(url)
-        time.sleep(4)
+        time.sleep(5)
 
+        # -------- Course Title --------
         try:
             title = driver.find_element(By.TAG_NAME, "h1").text.strip()
         except:
             title = "Course Title Not Found"
 
-        body = driver.find_element(By.TAG_NAME, "body").text
-        body = re.sub(r'[^\x00-\x7F]+', ' ', body)
+        # -------- Course Info Box --------
+        course_info = []
+        try:
+            info_elements = driver.find_elements(By.CSS_SELECTOR, "div.course_info p")
+            for el in info_elements:
+                course_info.append(el.text.strip())
+        except:
+            pass
+
+        # -------- Accordion Sections --------
+        sections = []
+
+        try:
+            panels = driver.find_elements(By.CSS_SELECTOR, ".panel.panel-default")
+
+            for panel in panels:
+                try:
+                    header = panel.find_element(By.CSS_SELECTOR, "h4.panel-title a")
+                    section_title = header.text.strip()
+
+                    # Expand accordion
+                    driver.execute_script("arguments[0].click();", header)
+                    time.sleep(1)
+
+                    body = panel.find_element(By.CSS_SELECTOR, ".panel-collapse")
+                    section_content = body.text.strip()
+                    section_content = re.sub(r'[^\x00-\x7F]+', ' ', section_content)
+
+                    sections.append({
+                        "title": section_title,
+                        "content": section_content
+                    })
+
+                except:
+                    continue
+
+        except:
+            sections.append({
+                "title": "Course Content",
+                "content": "No accordion data found"
+            })
 
         all_courses.append({
             "title": title,
-            "content": body
+            "info": course_info,
+            "sections": sections
         })
 
-        print(f"✔ Scraped: {title}")
+        print(f"✔ Scraped full content: {title}")
 
     except Exception as e:
         print(f"❌ Failed to scrape {url}")
@@ -60,7 +101,7 @@ for url in course_urls:
 driver.quit()
 
 # ---------------- PDF CREATION ----------------
-pdf_name = "Sunbeam_All_Modular_Courses1.pdf"
+pdf_name = "Sunbeam_All_Modular_Courses_Full_Content.pdf"
 doc = SimpleDocTemplate(pdf_name, pagesize=A4)
 styles = getSampleStyleSheet()
 
@@ -72,11 +113,26 @@ for course in all_courses:
     story.append(Paragraph(course["title"], styles["Heading1"]))
     story.append(Spacer(1, 10))
 
-    for line in course["content"].split("\n"):
-        line = line.strip()
-        if line:
-            story.append(Paragraph(line, styles["Normal"]))
+    # Course Info
+    if course["info"]:
+        story.append(Paragraph("<b>Course Information</b>", styles["Heading2"]))
+        story.append(Spacer(1, 6))
+        for info in course["info"]:
+            story.append(Paragraph(info, styles["Normal"]))
             story.append(Spacer(1, 4))
+        story.append(Spacer(1, 10))
+
+    # Accordion Content
+    for section in course["sections"]:
+        story.append(Paragraph(section["title"], styles["Heading2"]))
+        story.append(Spacer(1, 6))
+
+        for line in section["content"].split("\n"):
+            if line.strip():
+                story.append(Paragraph(line, styles["Normal"]))
+                story.append(Spacer(1, 4))
+
+        story.append(Spacer(1, 10))
 
     story.append(PageBreak())
 
