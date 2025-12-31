@@ -6,6 +6,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 import re
+
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet
@@ -22,45 +23,50 @@ driver = webdriver.Chrome(
 
 wait = WebDriverWait(driver, 20)
 
-# ================== GET ALL COURSE URLS (SAFE) ==================
+# ================== GET COURSE URLs ==================
 def get_course_urls(home_url):
     driver.get(home_url)
-
-    # wait for page to load
     wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
-    # extract links via JavaScript to avoid stale elements
     urls = driver.execute_script("""
-        return Array.from(document.querySelectorAll('a'))
-            .map(a => a.href)
-            .filter(href =>
-                href &&
-                href.includes('/modular-courses/') &&
-                !href.includes('home')
-            );
+        return Array.from(document.querySelectorAll("a"))
+            .filter(a => a.href && a.href.includes("/modular-courses/"))
+            .map(a => a.href);
     """)
 
-    # remove duplicates while preserving order
-    unique_urls = list(dict.fromkeys(urls))
-    return unique_urls
+    return list(dict.fromkeys(urls))
 
 # ================== SCRAPE COURSE PAGE ==================
 def scrape_course(url):
     driver.get(url)
+    wait.until(EC.presence_of_element_located((By.TAG_NAME, "h1")))
 
-    try:
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "h1")))
-        title = driver.find_element(By.TAG_NAME, "h1").text.strip()
-    except:
-        return None
-
+    title = driver.find_element(By.TAG_NAME, "h1").text.strip()
     sections = []
 
-    # primary syllabus panels
+    # ========= SCRAPE TOP PAGE CONTENT =========
+    try:
+        top_section = driver.find_element(By.CSS_SELECTOR, "section")
+        top_text = driver.execute_script(
+            "return arguments[0].innerText;", top_section
+        )
+
+        top_text = re.sub(r'[^\x00-\x7F]+', ' ', top_text).strip()
+
+        if top_text:
+            sections.append({
+                "title": "Course Overview",
+                "content": top_text
+            })
+    except:
+        pass
+
+    # ========= SCRAPE SYLLABUS / OTHER PANELS =========
     panels = driver.find_elements(By.CSS_SELECTOR, ".panel.panel-default")
+
     for panel in panels:
         try:
-            section_title = panel.find_element(By.CSS_SELECTOR, "h4").text.strip()
+            sec_title = panel.find_element(By.CSS_SELECTOR, "h4").text.strip()
             body = panel.find_element(By.CSS_SELECTOR, ".panel-body")
 
             content = driver.execute_script(
@@ -71,29 +77,11 @@ def scrape_course(url):
 
             if content:
                 sections.append({
-                    "title": section_title,
+                    "title": sec_title,
                     "content": content
                 })
         except:
             continue
-
-    # fallback if panels not found
-    if not sections:
-        try:
-            main = driver.find_element(By.TAG_NAME, "section")
-            content = driver.execute_script(
-                "return arguments[0].innerText;", main
-            )
-
-            content = re.sub(r'[^\x00-\x7F]+', ' ', content).strip()
-
-            if content:
-                sections.append({
-                    "title": "Course Content",
-                    "content": content
-                })
-        except:
-            pass
 
     return {
         "title": title,
@@ -101,28 +89,25 @@ def scrape_course(url):
     }
 
 # ================== PDF SETUP ==================
-pdf_name = "Sunbeam_Modular_Courses.pdf"
+pdf_name = "Sunbeam_Modular_Courses_COMPLETE_INFO.pdf"
 doc = SimpleDocTemplate(pdf_name, pagesize=A4)
 styles = getSampleStyleSheet()
 
 story = [
-    Paragraph("Sunbeam Modular Courses – Complete Syllabus", styles["Title"]),
-    Spacer(1, 30)
+    Paragraph("Sunbeam Modular Courses – Full Course Information", styles["Title"]),
+    Spacer(1, 25)
 ]
 
 # ================== MAIN EXECUTION ==================
 home_url = "https://www.sunbeaminfo.in/modular-courses-home"
-
 course_urls = get_course_urls(home_url)
-print(f"Found {len(course_urls)} courses")
 
-for course_url in course_urls:
-    print(f"Scraping: {course_url}")
+print(f"✅ Found {len(course_urls)} courses")
 
-    course = scrape_course(course_url)
-    if not course:
-        print("⚠️ Skipping course")
-        continue
+for idx, url in enumerate(course_urls, start=1):
+    print(f"Scraping ({idx}/{len(course_urls)}): {url}")
+
+    course = scrape_course(url)
 
     story.append(Paragraph(course["title"], styles["Heading1"]))
     story.append(Spacer(1, 12))
